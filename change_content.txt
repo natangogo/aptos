@@ -1,0 +1,13 @@
+<修正した個所>
+◎def _get_label_for_timestamp
+eps=0.2を追加した。
+➡フレームのtimestepは小数点付きなので、微妙にずれてしまう。本当なら253秒が、254.00001や、255.540000などにずれる問題アリ
+　これのせいで、範囲内に入っていても入っていないと間違って認識されてしまっていた
+　そのため、eps=0.2の誤差を許容することで[No Match]を大幅に削減可能
+
+◎frame = reader[frame_index].asnumpy()
+decoedライブラリが返す、NDArrayはPytorchでは使えないので、asnumpy()を用いることでnumpy配列に変更
+
+◎yield frame, label, timestamp_val, vid
+ここで、引数が4つだったら、__main__でも「for frames_batch, labels_batch, timestamps_batch, name in train_loader:」のように、train_loaderから受け取るものを
+4つにする必要がある。そのため、for frames_batch, labels_batch, timestamps_batch, name in train_loaderに「name」を追加

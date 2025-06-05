@@ -12,10 +12,10 @@ class Separable_Conv(nn.Module):
         self.conv2 = nn.Conv1d(in_channels, in_channels, kernel_size, dilation=2, padding=(kernel_size-1)//2*2, groups=in_channels)
         self.conv3 = nn.Conv1d(in_channels, in_channels, kernel_size, dilation=4, padding=(kernel_size-1)//2*4, groups=in_channels)
         self.conv4 = nn.Conv1d(in_channels, in_channels, kernel_size, dilation=5, padding=(kernel_size-1)//2*5, groups=in_channels)
-        self.conv_second1 = nn.Conv1d(in_channels, out_channels, kernel_size=1)
-        self.conv_second2 = nn.Conv1d(in_channels, out_channels, kernel_size=1) 
-        self.conv_second3 = nn.Conv1d(in_channels, out_channels, kernel_size=1) 
-        self.conv_second4 = nn.Conv1d(in_channels, out_channels, kernel_size=1) 
+        self.conv_second1 = nn.Conv1d(in_channels, out_channels//4, kernel_size=1)
+        self.conv_second2 = nn.Conv1d(in_channels, out_channels//4, kernel_size=1) 
+        self.conv_second3 = nn.Conv1d(in_channels, out_channels//4, kernel_size=1) 
+        self.conv_second4 = nn.Conv1d(in_channels, out_channels//4, kernel_size=1) 
             #元の画像とサイズを合わせるために、padding=(kernel_size-1)//2*d
     
     def forward(self, x):
@@ -29,7 +29,6 @@ class Separable_Conv(nn.Module):
         out4 = self.conv_second4(x4)
         #これらの出力をconcatすることで、様々な間引き率の結果から全体を把握できる
         x_out = torch.cat([out1, out2, out3, out4], dim=1)
-
         return x_out
 
 class Conv_Unit(nn.Module):
@@ -37,10 +36,10 @@ class Conv_Unit(nn.Module):
                  in_channels,
                  out_channels):
         super(Conv_Unit, self).__init__()
-        self.conv = nn.Conv1d(in_channels, out_channels, kernel_size=1)
-        self.conv_k8 = Separable_Conv(in_channels, out_channels, kernel_size=8)
-        self.conv_k16 = Separable_Conv(in_channels, out_channels, kernel_size=16)
-        self.conv_k20 = Separable_Conv(in_channels, out_channels, kernel_size=20)
+        self.conv = nn.Conv1d(in_channels, in_channels, kernel_size=1)
+        self.conv_k8 = Separable_Conv(in_channels, out_channels//3, kernel_size=3)#kernel_size=8
+        self.conv_k16 = Separable_Conv(in_channels, out_channels//3, kernel_size=5)#kernel_size=16
+        self.conv_k20 = Separable_Conv(in_channels, out_channels//3, kernel_size=7)#kernel_size=20
     
     def forward(self, x):
         x = self.conv(x)
@@ -48,8 +47,7 @@ class Conv_Unit(nn.Module):
         out2 = self.conv_k16(x)
         out3 = self.conv_k20(x)
         out = torch.cat([out1, out2, out3], dim=1)
-
-        return out
+        return out # out channels = out*3
 
 class Residual_Connection(nn.Module):
     def __init__(self,
@@ -70,25 +68,23 @@ class MSD_Block(nn.Module):
                  in_channels,
                  out_channels):
         super(MSD_Block, self).__init__()
-        self.CU = Conv_Unit(in_channels, out_channels)
+        self.CU = Conv_Unit(in_channels, out_channels//2)
         self.average_pool = nn.AvgPool1d(kernel_size=3, stride=3)
-        self.conv = nn.Conv1d(in_channels, out_channels, kernel_size=1)
+        self.conv = nn.Conv1d(out_channels//2, out_channels//2, kernel_size=1)
         self.norm = nn.BatchNorm1d(out_channels)
-        self.relu = nn.ReLU() 
+        self.relu = nn.ReLU(inplace=True) 
         self.RC = Residual_Connection(in_channels, out_channels)
     
     def forward(self, x):
         out1 = self.CU(x)
+        # out2 = self.average_pool(x)
+        out2 = self.conv(out1)
 
-        out2 = self.average_pool(x)
-        out2 = self.conv(out2)
-
-        out = torch.cat([out1, out2], dim=1)
+        out = torch.cat([out1, out2], dim=1)# out channels = out*2
         out = self.norm(out)
         out_left = self.relu(out)
 
         out_right = self.RC(x)
-
 
         return out_left + out_right
 
@@ -107,8 +103,8 @@ class MSTCN(nn.Module):
     
     def forward(self, x):
         out = self.MSB_blocks(x)
-        out = self.global_average_pool(out)
-        out = self.classifier(out.squeeze(-1))
+        out = self.global_average_pool(out) # [B, C, T] -> [B, C, 1]
+        out = self.classifier(out.squeeze(-1)) # [B, C, 1] -> [B, C]
         out = self.softmax(out)
 
         return out
