@@ -138,23 +138,25 @@ class AptosIterableDataset(IterableDataset):
                 if not annots:  # Skip videos without annotations
                     continue
 
-                reader = VideoReader(path, ctx=cpu(0))
-                num_frames = len(reader)
-                frame_rate = reader.get_avg_fps()
+                try:
+                    reader = VideoReader(path, ctx=cpu(0))
+                    num_frames = len(reader)
+                    frame_rate = reader.get_avg_fps()
+                except Exception as e:
+                    print(f"[Decord Error] Failed to open video {vid}: {e}")
+                    continue
                 duration = num_frames / frame_rate  # 秒数
                 # print(f"{vid}: duration={duration:.2f}s, frame_rate={frame_rate:.2f}, num_frames={num_frames}")
+                # === 対策 1: 不正な動画メタ情報をスキップ ===
+                if duration <= 1 or frame_rate < 1:
+                    print(f"[Warning] Skipping {vid}: invalid duration ({duration:.2f}s) or fps ({frame_rate:.2f})")
+                    continue
 
                 annots = [
                     (start, end, phase)
                     for (start, end, phase) in annots
                     if start < duration  # startが動画内にあれば有効とみなす
                 ]
-                # annots = [
-                #     (start, end, phase)
-                #     for (start, end, phase) in annots
-                #     if not (start > duration)  # startが完全に外なら除外
-                # ]
-                # print(label)
                 if not annots:
                     print(f"Skipping {vid}: all annotations exceed duration ({duration:.2f}s)")
                     continue
@@ -168,14 +170,15 @@ class AptosIterableDataset(IterableDataset):
                 while second < duration:
                     try:
                         frame_index = int(second * frame_rate)
-                        if frame_index >= num_frames:
-                            break
-
-                        timestamp_val = round(reader.get_frame_timestamp(frame_index)[0], 2)
-                        label = self._get_label_for_timestamp(timestamp_val, annots)
+                        if  frame_index >= num_frames - 1:
+                            second += fps_step
+                            continue
                         
+                        timestamp_val = round(second, 2)
+
+                        label = self._get_label_for_timestamp(timestamp_val, annots)
                         if label is None:
-                            second += fps_step  # ← ここで進める
+                            second += fps_step
                             continue
 
                         frame = reader[frame_index]
@@ -186,16 +189,21 @@ class AptosIterableDataset(IterableDataset):
                         timestamps.append(timestamp_val)
 
                     except Exception as e:
-                        # ログ出力などがあればここで
+                        print(f"[Frame Error] {vid}: frame_idx={frame_index} error: {e}")
+                        second += fps_step
                         continue
 
                     second += fps_step  # ← ★これがwhileの最後に必須
 
                 if len(frames) >= 8 and label is not None:  # 最低系列長を保証
                     frames_tensor = torch.stack(frames, dim=0)  # → [T, C, H, W]
-                    
-                    yield frames_tensor, label, timestamps[0], vid, frame_rate
+                    final_label = timestamps and self._get_label_for_timestamp(timestamps[0], annots)
+                    if final_label is not None:
+                        yield frames_tensor, label, timestamps[0], vid, frame_rate
+                    else:
+                        print(f"[Skip] No valid label found in {vid}")
                 else:
+                    print(f"[Skip] Too few valid frames in {vid}")
                     continue  # 明示的にスキップ
 
             except Exception as e:
@@ -221,6 +229,6 @@ if __name__ == "__main__":
     val_ds = AptosIterableDataset(video_dir, ann_dir, split='val')
     val_loader = DataLoader(val_ds, batch_size=None)
 
-    for frames_batch, labels_batch, timestamps_batch, name in train_loader:
+    for frames_batch, labels_batch, timestamps_batch, name, frame_rate in train_loader:
         # print(frames_batch.shape, labels_batch.shape, timestamps_batch.shape, f"label:{labels_batch}")
         print(f"video: {name}, timestamp: {timestamps_batch}, label: {labels_batch}")
