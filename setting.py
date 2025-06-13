@@ -1,6 +1,7 @@
 NUM_CLASSES = 35
 BASIC_CHANNELS = 32
-PATH_APTOS_VIDEO = r"F:/APTOS/aptos_ophnet_new2/aptos_videos"
+# PATH_APTOS_VIDEO = r"F:/APTOS/aptos_ophnet_new2/aptos_videos"
+PATH_APTOS_VIDEO = r"F:/APTOS/aptos_ophnet_new3/fixed_videos"
 PATH_APTOS_CSV = r"F:/APTOS/aptos_ophnet_new2/APTOS_train-val_annotation.csv"
 EPOCHS = 10
 FRAME_EXTRACT_INTERVAL_SEC = 1
